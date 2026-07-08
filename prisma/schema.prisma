@@ -1,0 +1,466 @@
+// Prisma Schema for Department Timetable Coordination System
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== BUILDINGS ====================
+
+model Building {
+  id          String   @id @default(cuid())
+  name        String   // "Main Building", "Block A", etc.
+  code        String   @unique // "MAIN", "BLK-A"
+  address     String?
+  floors      Int      @default(1)
+  
+  rooms       Room[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ==================== ACADEMIC SESSIONS ====================
+
+model AcademicSession {
+  id            String        @id @default(cuid())
+  name          String        // "2024-25 Odd Semester"
+  academicYear  String        // "2024-25"
+  semesterType  SemesterType  // ODD or EVEN
+  isActive      Boolean       @default(false)
+  startDate     DateTime?
+  endDate       DateTime?
+  
+  // Relations - all data tied to this session
+  sections      Section[]
+  allocations   Allocation[]
+  slotRequests  SlotRequest[]
+  uploads       TimetableUpload[]
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@unique([academicYear, semesterType])
+}
+
+enum SemesterType {
+  ODD   // Sem 1, 3, 5, 7
+  EVEN  // Sem 2, 4, 6, 8
+}
+
+// ==================== AUTH & USERS ====================
+
+model User {
+  id            String      @id @default(cuid())
+  email         String      @unique
+  password      String
+  name          String
+  role          Role
+  departmentId  String?
+  department    Department? @relation(fields: [departmentId], references: [id])
+  
+  slotRequests  SlotRequest[]
+  approvals     Approval[]
+  timetableUploads TimetableUpload[]
+  auditLogs     AuditLog[]
+  
+  // Exchange requests
+  exchangeRequests  ExchangeRequest[]
+  exchangeResponses ExchangeRequest[] @relation("ExchangeResponder")
+  
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+enum Role {
+  ADMIN
+  COORDINATOR
+  HOD
+}
+
+// ==================== DEPARTMENTS ====================
+
+model Department {
+  id            String            @id @default(cuid())
+  code          String            @unique
+  name          String
+  
+  users         User[]
+  rooms         Room[]
+  sections      Section[]
+  semesters     Semester[]
+  statistics    DepartmentStats?
+  approvals     Approval[]
+  subjects      Subject[]
+  faculties     Faculty[]
+  
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+}
+
+model DepartmentStats {
+  id                  String     @id @default(cuid())
+  departmentId        String     @unique
+  department          Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  
+  totalSections       Int        @default(0)
+  totalRooms          Int        @default(0)
+  targetClassHours    Int        @default(0)
+  achievedClassHours  Int        @default(0)
+  classGapHours       Int        @default(0)
+  targetLabHours      Int        @default(0)
+  achievedLabHours    Int        @default(0)
+  labGapHours         Int        @default(0)
+  allocationPercent   Int        @default(0)
+  
+  lastUpdated         DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+}
+
+// ==================== SEMESTERS ====================
+
+model Semester {
+  id              String      @id @default(cuid())
+  name            String
+  code            String      @unique
+  startDate       DateTime?
+  endDate         DateTime?
+  isActive        Boolean     @default(false)
+  departmentId    String?
+  department      Department? @relation(fields: [departmentId], references: [id])
+  
+  sections        Section[]
+  
+  createdAt       DateTime    @default(now())
+}
+
+// ==================== SECTIONS ====================
+
+model Section {
+  id                    String           @id @default(cuid())
+  departmentId          String
+  department            Department       @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  semesterId            String
+  semester              Semester         @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  sessionId             String?
+  session               AcademicSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  
+  year                  Int
+  division              String
+  studentCount          Int              @default(0)
+  requiredTheoryHours   Int              @default(25)
+  requiredLabHours      Int              @default(15)
+  
+  allocations           Allocation[]
+  slotRequests          SlotRequest[]
+  facultyMappings       FacultySubjectMapping[]
+  
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  
+  @@unique([departmentId, semesterId, year, division])
+}
+
+// ==================== ROOMS ====================
+
+model Room {
+  id            String      @id @default(cuid())
+  logicalName   String
+  actualName    String?
+  code          String      @unique
+  type          String      @default("CLASSROOM")
+  capacity      Int         @default(60)
+  departmentId  String?
+  department    Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  buildingId    String?
+  building      Building?   @relation(fields: [buildingId], references: [id], onDelete: SetNull)
+  
+  allocations   Allocation[]
+  statistics    RoomStats?
+  slotRequests  SlotRequest[]
+  
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model RoomStats {
+  id              String   @id @default(cuid())
+  roomId          String   @unique
+  room            Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  
+  totalSlots      Int      @default(40)
+  occupiedSlots   Int      @default(0)
+  freeSlots       Int      @default(40)
+  utilizationPct  Int      @default(0)
+  
+  lastUpdated     DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ==================== ALLOCATIONS ====================
+
+model Allocation {
+  id              String            @id @default(cuid())
+  sectionId       String
+  section         Section           @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  roomId          String
+  room            Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  uploadId        String?
+  upload          TimetableUpload?  @relation(fields: [uploadId], references: [id], onDelete: SetNull)
+  sessionId       String?
+  session         AcademicSession?  @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  
+  day             String            // "Monday", "Tuesday", etc.
+  startTime       String            // "Slot 1", "Slot 2", etc.
+  endTime         String            // "10:00"
+  subject         String            // Display name (can be updated from Subject.shortName)
+  faculty         String            // Display name (can be updated from Faculty.initials)
+  type            AllocationType
+  allocationType  String            @default("ALLOCATED")  // "ALLOCATED", "FREE"
+  
+  // Optional links to Subject and Faculty tables
+  subjectId       String?
+  linkedSubject   Subject?          @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  
+  // For labs: up to 5 faculty members (comma-separated IDs stored, display as initials)
+  facultyIds      String?           // Comma-separated faculty IDs for labs
+  
+  isModified      Boolean           @default(false)
+  
+  // Exchange requests
+  sourceExchanges ExchangeRequest[] @relation("SourceExchange")
+  targetExchanges ExchangeRequest[] @relation("TargetExchange")
+  
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  @@unique([roomId, day, startTime, sessionId])
+  @@index([sectionId])
+  @@index([roomId])
+  @@index([uploadId])
+  @@index([subjectId])
+  @@index([sessionId])
+}
+
+enum AllocationType {
+  THEORY
+  LAB
+}
+
+// ==================== SLOT REQUESTS ====================
+
+model SlotRequest {
+  id              String          @id @default(cuid())
+  requesterId     String
+  requester       User            @relation(fields: [requesterId], references: [id])
+  
+  roomId          String
+  room            Room            @relation(fields: [roomId], references: [id])
+  sectionId       String
+  section         Section         @relation(fields: [sectionId], references: [id])
+  sessionId       String?
+  session         AcademicSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  
+  day             String
+  startTime       String
+  endTime         String
+  reason          String
+  
+  status          RequestStatus   @default(PENDING)
+  
+  approvals       Approval[]
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  @@index([requesterId])
+  @@index([status])
+  @@index([sessionId])
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Approval {
+  id              String            @id @default(cuid())
+  slotRequestId   String
+  slotRequest     SlotRequest       @relation(fields: [slotRequestId], references: [id], onDelete: Cascade)
+  
+  approverId      String
+  approver        User              @relation(fields: [approverId], references: [id])
+  
+  approverDeptId  String
+  approverDept    Department        @relation(fields: [approverDeptId], references: [id])
+  
+  decision        String            @default("PENDING")
+  comment         String?
+  
+  createdAt       DateTime          @default(now())
+  
+  @@unique([slotRequestId, approverId])
+  @@index([approverDeptId])
+}
+
+// ==================== EXCHANGE REQUESTS ====================
+
+model ExchangeRequest {
+  id                    String          @id @default(cuid())
+  
+  // Requester info
+  requesterId           String
+  requester             User            @relation(fields: [requesterId], references: [id])
+  
+  // Source allocation (what requester wants to give)
+  sourceAllocationId    String
+  sourceAllocation      Allocation      @relation("SourceExchange", fields: [sourceAllocationId], references: [id], onDelete: Cascade)
+  
+  // Target allocation (what requester wants)
+  targetAllocationId    String
+  targetAllocation      Allocation      @relation("TargetExchange", fields: [targetAllocationId], references: [id], onDelete: Cascade)
+  
+  reason                String
+  status                RequestStatus   @default(PENDING)
+  
+  // Response from target department
+  responderId           String?
+  responder             User?           @relation("ExchangeResponder", fields: [responderId], references: [id])
+  responseComment       String?
+  respondedAt           DateTime?
+  
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  
+  @@index([requesterId])
+  @@index([status])
+  @@index([sourceAllocationId])
+  @@index([targetAllocationId])
+}
+
+// ==================== UPLOADS & AUDIT ====================
+
+model TimetableUpload {
+  id              String           @id @default(cuid())
+  academicYear    String?
+  semester        String?
+  fileName        String?
+  roomFileName    String?
+  sectionFileName String?
+  fileType        String?
+  status          String           @default("PROCESSING")
+  isActive        Boolean          @default(false)
+  errorMessage    String?
+  
+  uploadedById    String
+  uploadedBy      User             @relation(fields: [uploadedById], references: [id])
+  
+  sessionId       String?
+  session         AcademicSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  
+  allocations     Allocation[]
+  
+  createdAt       DateTime         @default(now())
+  
+  @@index([uploadedById])
+  @@index([isActive])
+  @@index([sessionId])
+}
+
+model AuditLog {
+  id              String        @id @default(cuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+  
+  action          String
+  entityType      String
+  entityId        String
+  details         String?
+  
+  createdAt       DateTime      @default(now())
+  
+  @@index([userId])
+  @@index([entityType, entityId])
+}
+
+// ==================== SUBJECTS ====================
+
+model Subject {
+  id              String          @id @default(cuid())
+  code            String
+  name            String
+  shortName       String?         // For display in timetable cells
+  type            SubjectType
+  credits         Int             @default(3)
+  hoursPerWeek    Int             @default(3)
+  
+  departmentId    String
+  department      Department      @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  semesterNum     Int             // 1, 2, 3, 4, 5, 6, 7, 8
+  
+  facultyMappings FacultySubjectMapping[]
+  allocations     Allocation[]
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  @@unique([code, departmentId, semesterNum])
+  @@index([departmentId])
+  @@index([semesterNum])
+}
+
+enum SubjectType {
+  THEORY
+  LAB
+  TUTORIAL
+}
+
+// ==================== FACULTY ====================
+
+model Faculty {
+  id              String          @id @default(cuid())
+  name            String
+  initials        String          // Short code like "ABC", "JS"
+  email           String?
+  phone           String?
+  designation     String?         // Professor, Asst. Prof, etc.
+  
+  departmentId    String
+  department      Department      @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  
+  subjectMappings FacultySubjectMapping[]
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  @@unique([initials, departmentId])
+  @@index([departmentId])
+}
+
+// ==================== FACULTY-SUBJECT MAPPING ====================
+
+model FacultySubjectMapping {
+  id              String          @id @default(cuid())
+  
+  facultyId       String
+  faculty         Faculty         @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+  
+  subjectId       String
+  subject         Subject         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  
+  sectionId       String
+  section         Section         @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  
+  @@unique([facultyId, subjectId, sectionId])
+  @@index([facultyId])
+  @@index([subjectId])
+  @@index([sectionId])
+}

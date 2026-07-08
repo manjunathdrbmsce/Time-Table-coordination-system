@@ -1,0 +1,9 @@
+{
+  "name": "Timetable Coordination System",
+  "short_name": "Timetable",
+  "description": "Department Timetable Coordination System",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3b82f6"
+}
