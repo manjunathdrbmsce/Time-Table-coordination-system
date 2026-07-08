@@ -1,0 +1,59 @@
+# Server deployment compose file.
+# Load the image tar first, then run:
+#   docker compose -f docker-compose.server.yml up -d
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: timetable-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-timetable_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-TimetableSecure2024!}
+      POSTGRES_DB: ${POSTGRES_DB:-timetable_db}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+      - ./init-db:/docker-entrypoint-initdb.d
+    ports:
+      - "5433:5432"
+    networks:
+      - timetable-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-timetable_user} -d ${POSTGRES_DB:-timetable_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    image: manjunathdrcse/timetable-app:server-20260622
+    container_name: timetable-app
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-timetable_user}:${POSTGRES_PASSWORD:-TimetableSecure2024!}@db:5432/${POSTGRES_DB:-timetable_db}?schema=public
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3080}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-your-super-secret-key-change-this-in-production}
+      - AUTH_SECRET=${AUTH_SECRET:-your-super-secret-key-change-this-in-production}
+      - AUTH_TRUST_HOST=true
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-timetable_user}
+    ports:
+      - "3080:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - timetable-network
+    volumes:
+      - ./uploads:/app/uploads
+
+networks:
+  timetable-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
